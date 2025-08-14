@@ -1,0 +1,96 @@
+# workflow 名称
+name: update-issue-title
+
+# 当 issues 的标签发生变化时触发
+on:
+  issues:
+    types: [labeled]
+
+# 需要执行的任务列表
+jobs:
+  # 更新issue标题任务
+  update_title:
+    # 运行环境
+    runs-on: ubuntu-latest
+    # 运行条件 => issues 被标记为 success 标签
+    if: contains(github.event.label.name, 'success')
+    # 更新标题任务的步骤列表
+    steps:
+      # 1. 更新 issue 标题
+      - name: Update issue title
+        uses: actions/github-script@v5
+        with:
+          script: |
+            const issueBody = context.payload.issue.body;
+            const issueNumber = context.payload.issue.number;
+            const currentTitle = context.payload.issue.title;
+            
+            console.log('Issue body:', issueBody);
+            console.log('Current title:', currentTitle);
+            
+            try {
+              // 解析 issue 内容，提取镜像信息
+              const jsonMatch = issueBody.match(/```json\s*([\s\S]*?)\s*```/);
+              if (!jsonMatch) {
+                console.log('No JSON block found in issue body');
+                return;
+              }
+              
+              const jsonContent = jsonMatch[1].trim();
+              console.log('Extracted JSON:', jsonContent);
+              
+              const hubMirrors = JSON.parse(jsonContent);
+              const images = hubMirrors['hub-mirror'] || [];
+              const platform = hubMirrors['platform'] || '';
+              
+              if (images.length === 0) {
+                console.log('No images found in hub-mirror array');
+                return;
+              }
+              
+              // 生成新的标题
+              let newTitle;
+              if (images.length === 1) {
+                // 单个镜像
+                const imageName = images[0].split('/').pop().split(':')[0].split('@')[0];
+                if (platform) {
+                  newTitle = `${platform} ${imageName}`;
+                } else {
+                  newTitle = imageName;
+                }
+              } else {
+                // 多个镜像
+                if (platform) {
+                  newTitle = `${platform} ${images.length}个镜像`;
+                } else {
+                  newTitle = `${images.length}个镜像`;
+                }
+              }
+              
+              console.log('New title:', newTitle);
+              
+              // 更新 issue 标题
+              await github.rest.issues.update({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issueNumber,
+                title: newTitle
+              });
+              
+              console.log('Issue title updated successfully');
+              
+            } catch (error) {
+              console.error('Error updating issue title:', error);
+              
+              // 如果解析失败，使用通用标题
+              const fallbackTitle = `镜像同步 #${issueNumber}`;
+              
+              await github.rest.issues.update({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issueNumber,
+                title: fallbackTitle
+              });
+              
+              console.log('Used fallback title:', fallbackTitle);
+            }
